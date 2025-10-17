@@ -2,7 +2,7 @@
 ## Complete Characterization of Decoherence Scaling
 
 **Project**: Investigation of decoherence suppression in coupled qubit systems
-**Date Completed**: [Your date]
+**Date Completed**: 17 October 2025
 **System**: N=6 qubits coupled to M=2 qubit environment
 **Status**: Rigorous experimental measurement complete
 
