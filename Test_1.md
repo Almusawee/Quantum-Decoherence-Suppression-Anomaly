@@ -183,22 +183,7 @@ Change from lowest to highest strength: 36% reduction (factor of 1.56×)
 
 ---
 
-## RECOMMENDED NEXT INVESTIGATIONS
 
-**High Priority** (would clarify mechanism):
-1. Measure long-time purity plateau (t=50s) to detect saturation
-2. Fit non-exponential models (stretched exponential, saturation model, power law)
-3. Measure system-environment entanglement to detect memory effects
-
-**Medium Priority** (would test robustness):
-4. Test different coupling strengths (g = 0.001 to 0.1)
-5. Test different system sizes (N = 4, 5, 7, 8)
-
-**Lower Priority** (would understand limits):
-6. Test in weak coupling regime (verify standard theory applies)
-7. Measure finite-size scaling
-
----
 
 ## OPEN QUESTIONS FOR EXPERT FEEDBACK
 
