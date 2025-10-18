@@ -9,7 +9,7 @@
 
 **Status:** Reproducible baseline measurement. Mechanism unclear. Seeking expert interpretation.
 
-**Data Quality:** High (baseline verified twice, R²=0.97)
+**Data Quality:** High (baseline verified multiple times, R²=0.987)
 
 ---
 
@@ -41,7 +41,7 @@ where: a_i, b_i, c_i ~ N(0, strength)
        J_ij ~ N(0, 0.4·strength)
 ```
 
-### Results (Run 1 & 2 - Identical)
+### Results (Run multiple times- Identical)
 
 **Decay Rates (from fit P(t) = exp(-γt), range 0-2s):**
 
@@ -55,7 +55,7 @@ where: a_i, b_i, c_i ~ N(0, strength)
 - s=1 vs s=0: 2.14x ± 0.39x
 - s=8 vs s=0: **7.09x ± 2.09x**
 
-**Statistical Significance:** 8.3σ
+**Statistical Significance:** 6.49σ
 
 **Quality Assessment:** 7/9
 - ✓ Good exponential fits (R² > 0.97 for all)
