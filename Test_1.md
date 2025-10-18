@@ -157,7 +157,7 @@ The poor exponential fit suggests:
 
 Both systems decay slowly compared to baseline:
 - Baseline s=8: γ = 0.000286
-- TEST A chaotic: γ = 0.000066 (4.3x slower)
+- TEST A chaotic: γ = 0.000086 (3.3x slower)
 
 Possible causes:
 - Different random Hamiltonian realizations
