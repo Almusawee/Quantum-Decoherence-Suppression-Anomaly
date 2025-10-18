@@ -262,13 +262,13 @@ Possible causes:
 
 - ✓ Parameters documented
 - ✓ Hamiltonian construction specified
-- ✓ Baseline measurement verified (2 runs identical)
+- ✓ Baseline measurement verified (multiple runs ~ identical)
 - ✓ Code available
 - ✓ Random seeds documented
 - ✓ Error analysis included
 - ✓ Plots saved
 - ✓ Data files archived
-- ⚠ TEST A results exploratory (not yet replicated)
+- ✓ TEST A results exploratory (replicated multiple times)
 
 ---
 
@@ -276,6 +276,7 @@ Possible causes:
 
 **Solid Result:**
 Seven-fold reproducible decoherence suppression in chaotic vs non-chaotic systems
+four-fold reproducible decoherence suppression in chaotic vs Integrable system 
 
 **Mechanistic Puzzle:**
 - Chaotic system doesn't show exponential decay
