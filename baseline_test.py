@@ -1,40 +1,912 @@
 
-# hybrid_stable_v5_rigorous.py
-# RIGOROUS validation with high statistics and comprehensive tests
-# No fabrication - all results with error bars and reproducibility checks
-# Requirements: numpy, scipy, matplotlib
-# WARNING: This will take several hours to run completely
+#!/usr/bin/env python3
+"""
+CRITICAL BASELINE TEST FOR DECOHERENCE PROTECTION
+==================================================
+
+This script tests THE most important question:
+Does scrambling (s=8) reduce decoherence compared to no scrambling (s=0)?
+
+Author: Scientific Validation
+Date: 2025
+Runtime: ~20-40 minutes (depending on shots)
+Requirements: numpy, scipy, matplotlib
+
+Usage:
+    python baseline_test.py
+
+Output:
+    - Console output with suppression factor
+    - Plot: baseline_comparison_[timestamp].png
+    - Data: baseline_results_[timestamp].npz
+"""
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.linalg import expm, logm
+from scipy.linalg import expm
 from scipy.optimize import curve_fit
 from numpy.random import default_rng
 import time as pytime
-import json
 from datetime import datetime
+import sys
 
 # ============================================================================
-# CONFIGURATION - Adjust for your computational budget
+# CONFIGURATION
 # ============================================================================
-QUICK_TEST = False  # Set True for fast testing, False for publication-quality
 
-if QUICK_TEST:
-    DEFAULT_SHOTS = 5
-    DEFAULT_N_STEPS = 30
-    print("⚠️  QUICK TEST MODE - Results not publication quality!")
+# Set to True for quick test (5 mins), False for publication quality (30-40 mins)
+QUICK_MODE = False
+
+if QUICK_MODE:
+    N_SHOTS = 10
+    print("⚡ QUICK MODE: 10 shots (for testing only)")
 else:
-    DEFAULT_SHOTS = 30  # Compromise between 20-50 for reasonable runtime
-    DEFAULT_N_STEPS = 50
-    print("✓ RIGOROUS MODE - Publication quality statistics")
+    N_SHOTS = 50
+    print("🔬 RIGOROUS MODE: 50 shots (publication quality)")
+
+# System parameters
+N = 6              # System qubits
+M_ENV = 2          # Environment qubits
+COUPLING_G = 0.02  # System-environment coupling
+T_MAX = 10.0        # Maximum evolution time
+N_STEPS = 50       # Time steps
+
+# ============================================================================
+# QUANTUM MECHANICS HELPERS
+# ============================================================================
 
 # Pauli matrices
-I2 = np.array([[1,0],[0,1]], dtype=complex)
-sx = np.array([[0,1],[1,0]], dtype=complex)
-sy = np.array([[0,-1j],[1j,0]], dtype=complex)
-sz = np.array([[1,0],[0,-1]], dtype=complex)
+I2 = np.array([[1, 0], [0, 1]], dtype=complex)
+sx = np.array([[0, 1], [1, 0]], dtype=complex)
+sy = np.array([[0, -1j], [1j, 0]], dtype=complex)
+sz = np.array([[1, 0], [0, -1]], dtype=complex)
+
+def kron_list(mats):
+    """Tensor product of list of matrices."""
+    out = np.array([1.0], dtype=complex)
+    for m in mats:
+        out = np.kron(out, m)
+    return out
+
+def op_on(n, op, idx):
+    """Apply operator op on qubit idx in n-qubit system."""
+    mats = [I2] * n
+    mats[idx] = op
+    return kron_list(mats)
+
+def two_on(n, op1, i1, op2, i2):
+    """Apply two-body operator."""
+    mats = [I2] * n
+    mats[i1] = op1
+    mats[i2] = op2
+    return kron_list(mats)
+
+def make_hermitian(A):
+    """Ensure matrix is Hermitian."""
+    return 0.5 * (A + A.conj().T)
+
+def normalize_rho(rho):
+    """Normalize density matrix."""
+    rho = make_hermitian(rho)
+    tr = np.real(np.trace(rho))
+    if np.abs(tr) < 1e-20:
+        return rho
+    return rho / tr
+
+def purity(rho):
+    """Compute purity Tr(ρ²)."""
+    val = np.trace(rho @ rho)
+    return float(np.real(val))
+
+def partial_trace_env(rho, N, M):
+    """Trace out last M qubits (environment)."""
+    dS = 2**N
+    dE = 2**M
+    rho = rho.reshape(dS, dE, dS, dE)
+    rhoS = np.zeros((dS, dS), dtype=complex)
+    for i in range(dE):
+        rhoS += rho[:, i, :, i]
+    return rhoS
 
 # ============================================================================
+# HAMILTONIAN CONSTRUCTION
+# ============================================================================
+
+def random_scrambling_H(N, strength=1.0, longrange=True, seed=None):
+    """Random scrambling Hamiltonian."""
+    if seed is not None:
+        rng = default_rng(seed)
+    else:
+        rng = default_rng()
+
+    d = 2**N
+    H = np.zeros((d, d), dtype=complex)
+
+    # Local fields
+    for i in range(N):
+        a, b, c = rng.normal(scale=strength, size=3)
+        H += a * op_on(N, sx, i)
+        H += b * op_on(N, sy, i)
+        H += c * op_on(N, sz, i)
+
+    # Two-body terms (long-range interactions)
+    if longrange:
+        for i in range(N):
+            for j in range(i+1, N):
+                Jx = rng.normal(scale=0.4 * strength)
+                Jy = rng.normal(scale=0.4 * strength)
+                Jz = rng.normal(scale=0.4 * strength)
+                H += Jx * two_on(N, sx, i, sx, j)
+                H += Jy * two_on(N, sy, i, sy, j)
+                H += Jz * two_on(N, sz, i, sz, j)
+
+    return make_hermitian(H)
+
+def build_H_total(N, M_env, scr_strength, coupling_g, seed=None):
+    """Build total Hamiltonian: H_sys + H_env + H_int."""
+
+    # System Hamiltonian
+    if scr_strength == 0:
+        Hs = np.zeros((2**N, 2**N), dtype=complex)
+    else:
+        Hs = random_scrambling_H(N, strength=scr_strength, longrange=True, seed=seed)
+
+    # Environment Hamiltonian
+    if M_env > 0:
+        He = random_scrambling_H(M_env, strength=0.5, longrange=False,
+                                seed=seed+1 if seed else None)
+    else:
+        He = np.zeros((1, 1), dtype=complex)
+
+    dS = 2**N
+    dE = 2**M_env
+
+    # Total: H = Hs ⊗ I + I ⊗ He + H_int
+    Htot = np.kron(Hs, np.eye(dE)) + np.kron(np.eye(dS), He)
+
+    # Interaction: couple boundary qubits to environment
+    n_boundary = max(1, int(N * 0.3))
+
+    A_sys = np.zeros((dS, dS), dtype=complex)
+    for b in range(n_boundary):
+        A_sys += op_on(N, sz, b)
+    A_sys = make_hermitian(A_sys)
+
+    B_env = np.zeros((dE, dE), dtype=complex)
+    for e in range(M_env):
+        B_env += op_on(M_env, sz, e)
+    B_env = make_hermitian(B_env)
+
+    Htot += coupling_g * np.kron(A_sys, B_env)
+
+    return make_hermitian(Htot)
+
+# ============================================================================
+# TIME EVOLUTION
+# ============================================================================
+
+def evolve_single_trajectory(N, M_env, scr_strength, coupling_g,
+                            t_max, n_steps, seed=None):
+    """Single evolution trajectory."""
+
+    # Build Hamiltonian
+    Htot = build_H_total(N, M_env, scr_strength, coupling_g, seed=seed)
+
+    # Initial state: random pure state for system, maximally mixed for environment
+    if seed is not None:
+        rng = default_rng(seed)
+    else:
+        rng = default_rng()
+
+    dS = 2**N
+    dE = 2**M_env
+
+    psi_sys = rng.normal(size=dS) + 1j * rng.normal(size=dS)
+    psi_sys /= np.linalg.norm(psi_sys)
+    rhoS0 = np.outer(psi_sys, psi_sys.conj())
+
+    rhoE0 = np.eye(dE) / dE
+    rho0 = np.kron(rhoS0, rhoE0)
+
+    # Time evolution
+    times = np.linspace(0, t_max, n_steps)
+    purities = []
+
+    for t in times:
+        U = expm(-1j * Htot * t)
+        rho_t = U @ rho0 @ U.conj().T
+
+        # Trace out environment
+        rhoS = partial_trace_env(rho_t, N, M_env)
+        rhoS = normalize_rho(rhoS)
+
+        purities.append(purity(rhoS))
+
+    return times, np.array(purities)
+
+def run_ensemble(N, M_env, scr_strength, coupling_g, t_max, n_steps, shots):
+    """Run ensemble of trajectories."""
+
+    print(f"  Running {shots} shots...", end='', flush=True)
+    start = pytime.time()
+
+    all_purities = []
+
+    for shot in range(shots):
+        seed = 1000 + shot
+        times, purities = evolve_single_trajectory(
+            N, M_env, scr_strength, coupling_g, t_max, n_steps, seed=seed
+        )
+        all_purities.append(purities)
+
+        if (shot + 1) % 10 == 0:
+            print(f"{shot+1}...", end='', flush=True)
+
+    elapsed = pytime.time() - start
+    print(f" done ({elapsed:.1f}s)")
+
+    all_purities = np.array(all_purities)
+
+    return {
+        'times': times,
+        'purities_mean': np.mean(all_purities, axis=0),
+        'purities_std': np.std(all_purities, axis=0),
+    }
+
+# ============================================================================
+# ANALYSIS
+# ============================================================================
+
+def fit_decay_rate(times, purities_mean, purities_std, fit_range=(0.0, 2.0)):
+    """Fit exponential decay with bootstrap error estimation."""
+
+    mask = (times >= fit_range[0]) & (times <= fit_range[1])
+    t_fit = times[mask]
+    p_mean = np.clip(purities_mean[mask], 1e-12, 1.0)
+    p_std = purities_std[mask]
+
+    if len(t_fit) < 3:
+        return np.nan, np.nan
+
+    # Best fit: P(t) = exp(-γt)
+    try:
+        coeffs = np.polyfit(t_fit, np.log(p_mean), 1)
+        gamma_best = -coeffs[0]
+    except:
+        return np.nan, np.nan
+
+    # Bootstrap for error estimation
+    n_bootstrap = 100
+    gammas_boot = []
+
+    for _ in range(n_bootstrap):
+        p_sample = p_mean + np.random.normal(0, p_std)
+        p_sample = np.clip(p_sample, 1e-12, 1.0)
+        try:
+            coeffs = np.polyfit(t_fit, np.log(p_sample), 1)
+            gammas_boot.append(-coeffs[0])
+        except:
+            pass
+
+    if len(gammas_boot) > 0:
+        gamma_std = np.std(gammas_boot)
+    else:
+        gamma_std = np.nan
+
+    return gamma_best, gamma_std
+
+def fit_with_quality_check(times, purity_mean, purity_std, fit_range=(0, 2)):
+    """
+    Fit exponential decay with quality metrics.
+
+    Returns:
+        gamma: Decay rate
+        gamma_err: Error on gamma
+        r_squared: Goodness of fit (0-1, higher is better)
+        residual_std: Standard deviation of residuals
+    """
+
+    mask = (times >= fit_range[0]) & (times <= fit_range[1])
+    t_fit = times[mask]
+    p_mean = np.clip(purity_mean[mask], 1e-12, 1.0)
+    p_std = purity_std[mask]
+
+    if len(t_fit) < 3:
+        return np.nan, np.nan, np.nan, np.nan
+
+    # Fit log(P) = log(P0) - γt
+    try:
+        coeffs = np.polyfit(t_fit, np.log(p_mean), 1)
+        gamma_best = -coeffs[0]
+        log_P0 = coeffs[1]
+    except:
+        return np.nan, np.nan, np.nan, np.nan
+
+    # Bootstrap for error estimation
+    n_bootstrap = 100
+    gammas_boot = []
+
+    for _ in range(n_bootstrap):
+        p_sample = p_mean + np.random.normal(0, p_std)
+        p_sample = np.clip(p_sample, 1e-12, 1.0)
+        try:
+            coeffs_boot = np.polyfit(t_fit, np.log(p_sample), 1)
+            gammas_boot.append(-coeffs_boot[0])
+        except:
+            pass
+
+    if len(gammas_boot) > 0:
+        gamma_err = np.std(gammas_boot)
+    else:
+        gamma_err = np.nan
+
+    # Calculate R² (goodness of fit)
+    p_pred = np.exp(log_P0 - gamma_best * t_fit)
+    ss_res = np.sum((p_mean - p_pred)**2)
+    ss_tot = np.sum((p_mean - np.mean(p_mean))**2)
+
+    if ss_tot > 1e-12:
+        r_squared = 1 - ss_res / ss_tot
+    else:
+        r_squared = np.nan
+
+    # Calculate residuals
+    residuals = p_mean - p_pred
+    residual_std = np.std(residuals)
+
+    return gamma_best, gamma_err, r_squared, residual_std
+
+
+def test_fit_range_sensitivity(times, purity_mean, purity_std):
+    """
+    Test if decay rate is consistent across different fit windows.
+
+    Returns:
+        is_robust: True if decay rate is stable
+        gamma_mean: Average gamma across windows
+        gamma_std: Spread in gamma values
+    """
+
+    fit_ranges = [(0, 1.5), (0, 2.0), (0, 2.5), (0, 3.0)]
+    valid_gammas = []
+
+    print("  Testing fit range sensitivity:")
+
+    for fr in fit_ranges:
+        g, e, r2, _ = fit_with_quality_check(times, purity_mean, purity_std, fit_range=fr)
+
+        if not np.isnan(g) and not np.isnan(r2) and r2 > 0.85:
+            valid_gammas.append(g)
+            print(f"    Range {fr}: γ = {g:.6f}, R² = {r2:.3f} ✓")
+        else:
+            print(f"    Range {fr}: Poor fit (R² = {r2:.3f}) ✗")
+
+    if len(valid_gammas) >= 2:
+        gamma_mean = np.mean(valid_gammas)
+        gamma_std = np.std(valid_gammas)
+        gamma_spread = gamma_std / gamma_mean if gamma_mean > 0 else np.inf
+
+        print(f"  Average γ = {gamma_mean:.6f} ± {gamma_std:.6f}")
+        print(f"  Relative spread: {gamma_spread*100:.1f}%")
+
+        if gamma_spread < 0.2:
+            print("  ✓ Decay rate ROBUST to fit range")
+            return True, gamma_mean, gamma_std
+        else:
+            print("  ⚠️  Decay rate SENSITIVE to fit range")
+            return False, gamma_mean, gamma_std
+    else:
+        print("  ✗ Insufficient good fits")
+        return False, np.nan, np.nan
+
+
+def test_time_regime_consistency(times, purity_mean, purity_std):
+    """
+    Check if decay is exponential by comparing early vs late regimes.
+
+    Returns:
+        decay_type: 'exponential', 'accelerating', 'decelerating', or 'non-exponential'
+        gamma_early: Decay rate in early regime
+        gamma_late: Decay rate in late regime
+        ratio: gamma_late / gamma_early
+    """
+
+    print("\n  Testing time regime consistency:")
+
+    # Early regime (0-2)
+    gamma_early, err_early, r2_early, _ = fit_with_quality_check(
+        times, purity_mean, purity_std, fit_range=(0, 2)
+    )
+
+    # Late regime (3-5)
+    gamma_late, err_late, r2_late, _ = fit_with_quality_check(
+        times, purity_mean, purity_std, fit_range=(3, 5)
+    )
+
+    print(f"    Early (0-2):  γ = {gamma_early:.6f} ± {err_early:.6f}, R² = {r2_early:.3f}")
+    print(f"    Late (3-5):   γ = {gamma_late:.6f} ± {err_late:.6f}, R² = {r2_late:.3f}")
+
+    if not np.isnan(gamma_early) and not np.isnan(gamma_late) and gamma_early > 0:
+        ratio = gamma_late / gamma_early
+        print(f"    Ratio (late/early): {ratio:.2f}")
+
+        if abs(ratio - 1.0) < 0.3 and r2_early > 0.85 and r2_late > 0.85:
+            print("    ✓ EXPONENTIAL decay (γ constant over time)")
+            decay_type = 'exponential'
+        elif ratio > 1.5:
+            print(f"    ⚠️  ACCELERATING decay (γ increases {ratio:.1f}x)")
+            decay_type = 'accelerating'
+        elif ratio < 0.67:
+            print(f"    ⚠️  DECELERATING decay (γ decreases {1/ratio:.1f}x)")
+            decay_type = 'decelerating'
+        else:
+            print("    ⚠️  NON-EXPONENTIAL decay")
+            decay_type = 'non-exponential'
+    else:
+        print("    ✗ Cannot determine (fit failed)")
+        decay_type = 'unknown'
+        ratio = np.nan
+
+    return decay_type, gamma_early, gamma_late, ratio
+
+
+def comprehensive_decay_analysis(results_dict, label):
+    """
+    Perform complete decay analysis on a single dataset.
+
+    Args:
+        results_dict: Output from run_ensemble()
+        label: Name for this dataset (e.g., 's0', 's8')
+
+    Returns:
+        analysis: Dictionary with all metrics
+    """
+
+    print(f"\n{'='*70}")
+    print(f"COMPREHENSIVE ANALYSIS: {label}")
+    print(f"{'='*70}")
+
+    times = results_dict['times']
+    purity_mean = results_dict['purities_mean']
+    purity_std = results_dict['purities_std']
+
+    # 1. Best fit with quality
+    gamma, gamma_err, r2, resid_std = fit_with_quality_check(
+        times, purity_mean, purity_std, fit_range=(0, 2)
+    )
+
+    print(f"\nBest fit (0-2 time range):")
+    print(f"  γ = {gamma:.6f} ± {gamma_err:.6f}")
+    print(f"  R² = {r2:.3f}")
+    print(f"  Residual std = {resid_std:.6f}")
+
+    if r2 < 0.85:
+        print("  ⚠️  WARNING: Poor fit quality (R² < 0.85)")
+    else:
+        print("  ✓ Good fit quality")
+
+    # 2. Fit range sensitivity
+    is_robust, gamma_avg, gamma_spread = test_fit_range_sensitivity(
+        times, purity_mean, purity_std
+    )
+
+    # 3. Time regime consistency
+    decay_type, gamma_early, gamma_late, time_ratio = test_time_regime_consistency(
+        times, purity_mean, purity_std
+    )
+
+    # 4. Plateau value (late-time purity)
+    late_mask = times >= 0.6 * times[-1]
+    plateau = np.mean(purity_mean[late_mask])
+    plateau_std = np.mean(purity_std[late_mask])
+
+    print(f"\nPlateau purity (late times): {plateau:.4f} ± {plateau_std:.4f}")
+
+    # Summary
+    print(f"\n{'='*70}")
+    print(f"SUMMARY FOR {label}:")
+    print(f"  Primary γ: {gamma:.6f} ± {gamma_err:.6f}")
+    print(f"  Fit quality: R² = {r2:.3f}")
+    print(f"  Decay type: {decay_type}")
+    print(f"  Robustness: {'PASS' if is_robust else 'FAIL'}")
+    print(f"{'='*70}")
+
+    return {
+        'gamma': gamma,
+        'gamma_err': gamma_err,
+        'r_squared': r2,
+        'residual_std': resid_std,
+        'is_robust': is_robust,
+        'gamma_avg': gamma_avg,
+        'gamma_spread': gamma_spread,
+        'decay_type': decay_type,
+        'gamma_early': gamma_early,
+        'gamma_late': gamma_late,
+        'time_ratio': time_ratio,
+        'plateau': plateau,
+        'plateau_std': plateau_std
+    }
+# ============================================================================
+# MAIN TEST
+# ============================================================================
+
+def test_baseline_comparison():
+    """THE CRITICAL TEST with comprehensive quality checks."""
+
+    print("\n" + "="*70)
+    print("🔬 CRITICAL BASELINE TEST: Measuring TRUE Suppression")
+    print("="*70)
+    print(f"\nParameters:")
+    print(f"  System: N={N} qubits")
+    print(f"  Environment: M={M_ENV} qubits")
+    print(f"  Coupling: g={COUPLING_G}")
+    print(f"  Shots: {N_SHOTS}")
+    print(f"  Expected runtime: ~{N_SHOTS * 0.6:.0f} seconds per test\n")
+
+    results = {}
+
+    # Test 1: No scrambling (baseline)
+    print("[1/3] Testing s=0 (NO system Hamiltonian - pure decoherence)")
+    results['s0'] = run_ensemble(
+        N, M_ENV,
+        scr_strength=0.0,
+        coupling_g=COUPLING_G,
+        t_max=T_MAX,
+        n_steps=N_STEPS,
+        shots=N_SHOTS
+    )
+
+    # Test 2: Weak scrambling
+    print("\n[2/3] Testing s=1 (weak scrambling)")
+    results['s1'] = run_ensemble(
+        N, M_ENV,
+        scr_strength=1.0,
+        coupling_g=COUPLING_G,
+        t_max=T_MAX,
+        n_steps=N_STEPS,
+        shots=N_SHOTS
+    )
+
+    # Test 3: Strong scrambling
+    print("\n[3/3] Testing s=8 (strong scrambling)")
+    results['s8'] = run_ensemble(
+        N, M_ENV,
+        scr_strength=8.0,
+        coupling_g=COUPLING_G,
+        t_max=T_MAX,
+        n_steps=N_STEPS,
+        shots=N_SHOTS
+    )
+
+    # ========================================================================
+    # COMPREHENSIVE ANALYSIS (NEW!)
+    # ========================================================================
+
+    print("\n" + "█"*70)
+    print("PERFORMING COMPREHENSIVE QUALITY CHECKS")
+    print("█"*70)
+
+    # Analyze each dataset
+    analysis = {}
+    for key in ['s0', 's1', 's8']:
+        analysis[key] = comprehensive_decay_analysis(results[key], key)
+
+    # Extract validated decay rates
+    gamma_0 = analysis['s0']['gamma']
+    err_0 = analysis['s0']['gamma_err']
+    gamma_1 = analysis['s1']['gamma']
+    err_1 = analysis['s1']['gamma_err']
+    gamma_8 = analysis['s8']['gamma']
+    err_8 = analysis['s8']['gamma_err']
+
+    # ========================================================================
+    # QUALITY ASSESSMENT
+    # ========================================================================
+
+    print("\n" + "="*70)
+    print("QUALITY ASSESSMENT")
+    print("="*70)
+
+    quality_score = 0
+    max_score = 9
+    issues = []
+
+    # Check 1: Fit quality (R² > 0.85 for all)
+    for key in ['s0', 's1', 's8']:
+        if analysis[key]['r_squared'] > 0.85:
+            quality_score += 1
+            print(f"✓ {key}: Good fit quality (R² = {analysis[key]['r_squared']:.3f})")
+        else:
+            print(f"✗ {key}: Poor fit quality (R² = {analysis[key]['r_squared']:.3f})")
+            issues.append(f"{key} has poor fit quality")
+
+    # Check 2: Robustness to fit range
+    for key in ['s0', 's1', 's8']:
+        if analysis[key]['is_robust']:
+            quality_score += 1
+            print(f"✓ {key}: Robust to fit range")
+        else:
+            print(f"⚠️  {key}: Sensitive to fit range")
+            issues.append(f"{key} sensitive to fit window")
+
+    # Check 3: Exponential decay type
+    for key in ['s0', 's1', 's8']:
+        if analysis[key]['decay_type'] == 'exponential':
+            quality_score += 1
+            print(f"✓ {key}: Exponential decay confirmed")
+        else:
+            print(f"⚠️  {key}: {analysis[key]['decay_type']} decay")
+            issues.append(f"{key} shows {analysis[key]['decay_type']} decay")
+
+    print(f"\nQuality score: {quality_score}/{max_score}")
+
+    if quality_score >= 7:
+        print("✓ HIGH QUALITY - Results are reliable")
+    elif quality_score >= 5:
+        print("⚠️  MODERATE QUALITY - Interpret with caution")
+    else:
+        print("✗ LOW QUALITY - Results may not be reliable")
+        print("\nIdentified issues:")
+        for issue in issues:
+            print(f"  • {issue}")
+
+    # ========================================================================
+    # SUPPRESSION CALCULATION
+    # ========================================================================
+
+    print("\n" + "="*70)
+    print("RESULTS: TRUE SUPPRESSION FACTORS")
+    print("="*70)
+
+    print(f"\nBaseline (s=0):  γ = {gamma_0:.6f} ± {err_0:.6f}")
+    print(f"Weak (s=1):      γ = {gamma_1:.6f} ± {err_1:.6f}")
+    print(f"Strong (s=8):    γ = {gamma_8:.6f} ± {err_8:.6f}")
+
+    # Calculate suppression factors
+    if gamma_1 > 1e-9 and gamma_8 > 1e-9:
+        suppression_1 = gamma_0 / gamma_1
+        suppression_8 = gamma_0 / gamma_8
+
+        # Error propagation
+        err_supp_1 = suppression_1 * np.sqrt(
+            (err_0/gamma_0)**2 + (err_1/gamma_1)**2
+        ) if not np.isnan(err_0) and not np.isnan(err_1) else np.nan
+
+        err_supp_8 = suppression_8 * np.sqrt(
+            (err_0/gamma_0)**2 + (err_8/gamma_8)**2
+        ) if not np.isnan(err_0) and not np.isnan(err_8) else np.nan
+    else:
+        suppression_1 = np.inf
+        suppression_8 = np.inf
+        err_supp_1 = np.inf
+        err_supp_8 = np.inf
+
+    print(f"\n{'='*70}")
+    print(f"Suppression (s=1 vs s=0): {suppression_1:.2f}x ± {err_supp_1:.2f}x")
+    print(f"Suppression (s=8 vs s=0): {suppression_8:.2f}x ± {err_supp_8:.2f}x")
+    print(f"{'='*70}")
+
+    # Statistical significance
+    diff = gamma_0 - gamma_8
+    err_combined = np.sqrt(err_0**2 + err_8**2)
+
+    if err_combined > 0 and not np.isnan(err_combined):
+        sigma = diff / err_combined
+    else:
+        sigma = 0.0
+
+    print(f"\nStatistical significance: {sigma:.2f}σ")
+
+    # ========================================================================
+    # SCIENTIFIC VERDICT (with quality consideration)
+    # ========================================================================
+
+    print("\n" + "="*70)
+    print("SCIENTIFIC VERDICT")
+    print("="*70)
+
+    # Adjust thresholds based on quality
+    if quality_score >= 7:
+        sigma_threshold_strong = 3.0
+        sigma_threshold_moderate = 2.0
+        suppression_threshold = 1.5
+    else:
+        sigma_threshold_strong = 4.0  # Higher bar for poor quality
+        sigma_threshold_moderate = 3.0
+        suppression_threshold = 2.0
+        print("\n⚠️  NOTE: Higher significance thresholds due to quality concerns")
+
+    if sigma > sigma_threshold_strong and suppression_8 > suppression_threshold and quality_score >= 7:
+        verdict = "CONFIRMED"
+        print("\n✅ STRONG EVIDENCE FOR PROTECTION")
+        print(f"   Suppression: {suppression_8:.2f}x ({sigma:.1f}σ significance)")
+        print(f"   Quality score: {quality_score}/{max_score}")
+        print("   → Scrambling reduces decoherence!")
+        print("\n📝 NEXT STEPS:")
+        print("   1. Test energy scale control (scrambling vs integrable)")
+        print("   2. Investigate mechanism (Zeno, matrix elements, etc.)")
+        print("   3. Scale to larger systems (N=5, 6)")
+
+    elif sigma > sigma_threshold_moderate and suppression_8 > 1.2:
+        verdict = "PARTIAL"
+        print("\n⚠️  MODERATE EVIDENCE FOR PROTECTION")
+        print(f"   Suppression: {suppression_8:.2f}x ({sigma:.1f}σ significance)")
+        print(f"   Quality score: {quality_score}/{max_score}")
+        print("   → Effect present but weak or uncertain")
+        print("\n📝 RECOMMENDATIONS:")
+        if quality_score < 7:
+            print("   1. Address quality issues (see above)")
+        print("   2. Increase shots to 100+ for better statistics")
+        print("   3. Test with stronger coupling (g=0.04)")
+        print("   4. Try larger system (N=5)")
+
+    else:
+        verdict = "REJECTED"
+        print("\n❌ NO SIGNIFICANT PROTECTION DETECTED")
+        print(f"   Suppression: {suppression_8:.2f}x ({sigma:.1f}σ significance)")
+        print(f"   Quality score: {quality_score}/{max_score}")
+        print("   → Original hypothesis is likely incorrect")
+        print("\n📝 ALTERNATIVE EXPLANATIONS:")
+        print("   1. Effect is too small for N=4 system")
+        print("   2. Mechanism is different than hypothesized")
+        print("   3. Energy scale effects (not scrambling-specific)")
+
+        if quality_score < 5:
+            print("\n⚠️  ADDITIONAL NOTE: Low quality score suggests:")
+            print("     • Non-exponential dynamics")
+            print("     • Numerical issues")
+            print("     • Need different analysis approach")
+
+    print("="*70)
+
+    # Generate plot
+    print("\n📊 Generating plots...")
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Plot 1: Purity trajectories
+    ax = axes[0]
+
+    colors = {'s0': 'red', 's1': 'orange', 's8': 'green'}
+    labels = {'s0': 's=0 (baseline)', 's1': 's=1 (weak)', 's8': 's=8 (strong)'}
+
+    for key in ['s0', 's1', 's8']:
+        res = results[key]
+        ax.plot(res['times'], res['purities_mean'], '-',
+               linewidth=2.5, label=labels[key], color=colors[key])
+        ax.fill_between(res['times'],
+                       res['purities_mean'] - res['purities_std'],
+                       res['purities_mean'] + res['purities_std'],
+                       alpha=0.2, color=colors[key])
+
+    ax.set_xlabel('Time', fontsize=13)
+    ax.set_ylabel('Purity', fontsize=13)
+    ax.set_title('Purity Evolution: Baseline Comparison', fontweight='bold', fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+
+    # Plot 2: Decay rates comparison
+    ax = axes[1]
+
+    strengths = ['s=0\n(baseline)', 's=1\n(weak)', 's=8\n(strong)']
+    gammas = [gamma_0, gamma_1, gamma_8]
+    errs = [err_0, err_1, err_8]
+    bar_colors = ['red', 'orange', 'green']
+
+    bars = ax.bar(range(3), gammas, yerr=errs, capsize=10,
+                  color=bar_colors, alpha=0.7, width=0.6, edgecolor='black', linewidth=1.5)
+
+    ax.set_xticks(range(3))
+    ax.set_xticklabels(strengths, fontsize=11)
+    ax.set_ylabel('Decay rate γ', fontsize=13)
+    ax.set_title('Decoherence Rates', fontweight='bold', fontsize=14)
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # Add suppression annotation
+    if suppression_8 < np.inf and not np.isnan(suppression_8):
+        ax.text(2, gamma_8 * 1.8, f'{suppression_8:.2f}x\nsuppression',
+               ha='center', va='bottom', fontsize=12, fontweight='bold',
+               color='green', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    # Add verdict to plot
+    verdict_colors = {'CONFIRMED': 'green', 'PARTIAL': 'orange', 'REJECTED': 'red'}
+    fig.text(0.5, 0.02, f'Verdict: {verdict}', ha='center', fontsize=14,
+            fontweight='bold', color=verdict_colors.get(verdict, 'black'))
+
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
+
+    # Save plot
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plot_filename = f'baseline_comparison_{timestamp}.png'
+    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+    print(f"   Plot saved: {plot_filename}")
+
+    plt.show()
+
+    # Save data
+    data_filename = f'baseline_results_{timestamp}.npz'
+    np.savez(data_filename,
+             gamma_0=gamma_0, err_0=err_0,
+             gamma_1=gamma_1, err_1=err_1,
+             gamma_8=gamma_8, err_8=err_8,
+             suppression_1=suppression_1, err_supp_1=err_supp_1,
+             suppression_8=suppression_8, err_supp_8=err_supp_8,
+             sigma=sigma,
+             verdict=verdict,
+             times=results['s0']['times'],
+             purity_s0_mean=results['s0']['purities_mean'],
+             purity_s0_std=results['s0']['purities_std'],
+             purity_s1_mean=results['s1']['purities_mean'],
+             purity_s1_std=results['s1']['purities_std'],
+             purity_s8_mean=results['s8']['purities_mean'],
+             purity_s8_std=results['s8']['purities_std'])
+
+    print(f"   Data saved: {data_filename}")
+
+    return {
+        'results': results,
+        'analysis': analysis,
+        'gamma_0': gamma_0,
+        'gamma_1': gamma_1,
+        'gamma_8': gamma_8,
+        'suppression_1': suppression_1,
+        'suppression_8': suppression_8,
+        'sigma': sigma,
+        'verdict': verdict,
+        'quality_score': quality_score,
+        'issues': issues
+    }
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
+if __name__ == "__main__":
+    print("""
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║                                                                      ║
+    ║        CRITICAL BASELINE TEST - THE DEFINITIVE EXPERIMENT            ║
+    ║                                                                      ║
+    ║  This test compares:                                                 ║
+    ║    • s=0: No system Hamiltonian (pure decoherence)                   ║
+    ║    • s=1: Weak scrambling                                            ║
+    ║    • s=8: Strong scrambling                                          ║
+    ║                                                                      ║
+    ║  This is THE MOST IMPORTANT TEST to validate the hypothesis.         ║
+    ║                                                                      ║
+    ╚══════════════════════════════════════════════════════════════════════╝
+    """)
+
+    print(f"Mode: {'QUICK (10 shots)' if QUICK_MODE else 'RIGOROUS (50 shots)'}")
+    print(f"Estimated total runtime: ~{N_SHOTS * 1.8:.0f} seconds ({N_SHOTS * 1.8 / 60:.1f} minutes)\n")
+
+    response = input("Proceed with test? (yes/no): ")
+
+    if response.lower() in ['yes', 'y']:
+        print("\n🚀 Starting critical baseline test...\n")
+
+        try:
+            baseline_results = test_baseline_comparison()
+
+            print("\n" + "="*70)
+            print("TEST COMPLETED SUCCESSFULLY")
+            print("="*70)
+            print(f"\n🎯 Final Verdict: {baseline_results['verdict']}")
+            print(f"🔢 Suppression Factor: {baseline_results['suppression_8']:.2f}x")
+            print(f"📊 Statistical Significance: {baseline_results['sigma']:.2f}σ")
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Test interrupted by user.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n\n❌ ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    else:
+        print("\n❌ Test cancelled by user.")
+        print("\nTo run later, execute: python baseline_test.py")
+        sys.exit(0)# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
