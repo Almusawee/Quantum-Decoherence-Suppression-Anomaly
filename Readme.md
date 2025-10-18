@@ -275,7 +275,7 @@ Possible causes:
 ## SUMMARY FOR EXPERT CONSULTATION
 
 **Solid Result:**
-Seven-fold reproducible decoherence suppression in chaotic vs non-chaotic systems
+Seven-fold reproducible decoherence suppression in chaotic vs non-chaotic systems,
 four-fold reproducible decoherence suppression in chaotic vs Integrable system 
 
 **Mechanistic Puzzle:**
