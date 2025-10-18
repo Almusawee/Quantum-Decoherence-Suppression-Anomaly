@@ -146,7 +146,7 @@ This is NOT simply a rate difference. It's a mechanistic difference.
 - **Prediction:** Effective coupling strength differs fundamentally
 
 
-### Puzzle 3: Absolute Decay Rates Are Small
+### Puzzle 2: Absolute Decay Rates Are Small
 
 Both systems decay slowly compared to baseline:
 - Baseline s=8: γ = 0.000286
