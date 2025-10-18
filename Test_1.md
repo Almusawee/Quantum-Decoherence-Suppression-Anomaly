@@ -92,15 +92,15 @@ Compare two systems at MATCHED energy scales:
 
 | System | γ (s⁻¹) | Error | R² | Fit Quality |
 |--------|---------|-------|-----|------------|
-| Chaotic | 0.000066 | 0.000010 | 0.917 | Good |
-| Integrable | 0.000176 | 0.000068 | 0.410 | Poor |
+| Chaotic | 0.000086 | 0.000010 | 0.994 | Good |
+| Integrable | 0.000374 | 0.000068 | 0.971 | Good |
 
-**Ratio:** γ_integrable / γ_chaotic = 2.66x
+**Ratio:** γ_integrable / γ_chaotic = 4.329x 
 
 ### Visual Data (Plots)
 
 **Left Panel - Purity Trajectories:**
-- Chaotic (red): Starts at 1.000, decays to ~0.997 by t=10
+- Chaotic (red): Starts at 1.000, decays to ~0.996 by t=10
 - Integrable (blue): Starts at 1.000, decays to ~0.985 by t=10
 - **Interpretation:** Chaotic stays near 1.0; integrable loses purity noticeably
 
