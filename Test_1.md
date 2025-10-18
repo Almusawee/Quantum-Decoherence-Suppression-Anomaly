@@ -164,7 +164,7 @@ Possible causes:
 | Aspect | Baseline | TEST A |
 |--------|----------|--------|
 | s=0 decay | γ = 0.00203 s⁻¹ | Not measured |
-| s=8 decay | γ = 0.000286 s⁻¹ | γ = 0.000066 s⁻¹ |
+| s=8 decay | γ = 0.000286 s⁻¹ | γ = 0.000086 s⁻¹ |
 | s=8 vs s=0 ratio | 7.09x | ~30x (if s=0 ~0.002) |
 | Fit model | Exponential ✓ | Chaotic: non-exp? Integrable: exp ✓ |
 | Energy control | Not varied | Matched perfectly |
