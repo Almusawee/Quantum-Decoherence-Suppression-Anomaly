@@ -145,13 +145,6 @@ This is NOT simply a rate difference. It's a mechanistic difference.
 - Nearest-neighbor (integrable) couples more directly to boundary
 - **Prediction:** Effective coupling strength differs fundamentally
 
-### Puzzle 2: Why Does Integrable R² Drop to 0.41?
-
-The poor exponential fit suggests:
-- Model mismatch for integrable at this regime
-- Non-exponential behavior in integrable too? (unlikely given clear semilog line)
-- High statistical noise in integrable decay rates
-- Possible: system reaches quasi-steady state
 
 ### Puzzle 3: Absolute Decay Rates Are Small
 
