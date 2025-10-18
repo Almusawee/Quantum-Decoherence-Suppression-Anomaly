@@ -202,8 +202,8 @@ Possible causes:
 - Environment is fixed to random chaotic (could be structured)
 
 ### Reproducibility
-- **Baseline:** Verified identical across two runs ✓
-- **TEST A:** Single run (design was exploratory)
+- **Baseline:** Verified identical across multiple runs ✓
+- **TEST A:** Verified identical across multiple runs runs 
 - **Random seeds:** Different each trajectory (intentional, for ensemble)
 - **Code:** Available and reproducible
 
