@@ -96,7 +96,7 @@ Compare two systems at MATCHED energy scales:
 | Integrable | 0.000374 | 0.000068 | 0.971 | Good |
 
 **Ratio:** γ_integrable / γ_chaotic = 4.329x 
-
+This directly contradicts the Quantum Zeno prediction. Zeno theory says if energy scales match, decay rates should be similar (ratio ~1.0).
 ### Visual Data (Plots)
 
 **Left Panel - Purity Trajectories:**
