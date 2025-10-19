@@ -212,11 +212,11 @@ Possible causes:
 ## 7. DATA FILES
 
 **Baseline Results:**
-- `baseline_results_20251018_062257.npz`: Times, purities, decay rates
-- `baseline_comparison_20251018_062257.png`: Plots
+- `baseline_results_20251019_122806.npz`: Times, purities, decay rates
+- `baseline_comparison.png`: Plots
 
 **TEST A Results:**
-- `test_a_energy_control_20251018_074619.png`: Purity trajectories and semilog plots
+- `test_a_energy_control.png`: Purity trajectories and semilog plots
 - Raw trajectory data: 50 shots chaotic, 50 shots integrable
 
 ---
