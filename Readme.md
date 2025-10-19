@@ -203,7 +203,7 @@ Possible causes:
 
 ### Reproducibility
 - **Baseline:** Verified identical across multiple runs ✓
-- **TEST A:** Verified identical across multiple runs runs 
+- **TEST A:** Verified identical across multiple runs 
 - **Random seeds:** Different each trajectory (intentional, for ensemble)
 - **Code:** Available and reproducible
 
