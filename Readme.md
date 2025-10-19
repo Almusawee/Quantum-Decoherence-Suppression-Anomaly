@@ -55,7 +55,7 @@ where: a_i, b_i, c_i ~ N(0, strength)
 - s=1 vs s=0: 2.14x ± 0.39x
 - s=8 vs s=0: **7.09x ± 2.09x**
 
-**Statistical Significance:** 6.49σ
+**Statistical Significance:** ~ 6σ
 
 **Quality Assessment:** 7/9
 - ✓ Good exponential fits (R² > 0.97 for all)
