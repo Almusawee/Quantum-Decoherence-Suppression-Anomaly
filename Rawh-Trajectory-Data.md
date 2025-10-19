@@ -211,7 +211,7 @@ Theory predicted:
   • If Zeno only: ratio ≈ 1.0-1.2
   • If scrambling matters: ratio > 1.5
 
-You measured:
+ Measured:
   • Ratio = 4.329
   • p-value = 0.000000
 
